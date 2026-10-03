@@ -28,25 +28,29 @@ namespace Rpc233
             if (timeout <= TimeSpan.Zero || timeout.TotalMilliseconds > int.MaxValue)
                 throw new ArgumentOutOfRangeException(nameof(timeout));
             cancellationToken.ThrowIfCancellationRequested();
-            using var deadline = new CancellationTokenSource(timeout);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-            var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var registration = linked.Token.Register(() => canceled.TrySetResult(true));
-            try
+            using (var deadline = new CancellationTokenSource(timeout))
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token))
             {
-                var operation = _transport.InvokeAsync(method, payload, linked.Token);
-                if (await Task.WhenAny(operation, canceled.Task).ConfigureAwait(false) != operation)
+                var canceled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                using (var registration = linked.Token.Register(() => canceled.TrySetResult(true)))
                 {
-                    // Observe a late failure even if a custom transport ignores cancellation.
-                    _ = operation.ContinueWith(t => { _ = t.Exception; }, CancellationToken.None,
-                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                    linked.Token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        var operation = _transport.InvokeAsync(method, payload, linked.Token);
+                        if (await Task.WhenAny(operation, canceled.Task).ConfigureAwait(false) != operation)
+                        {
+                            // Observe a late failure even if a custom transport ignores cancellation.
+                            _ = operation.ContinueWith(t => { _ = t.Exception; }, CancellationToken.None,
+                                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                            linked.Token.ThrowIfCancellationRequested();
+                        }
+                        return await operation.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+                    {
+                        throw new TimeoutException($"RPC '{method}' exceeded its deadline. The remote operation may have completed.");
+                    }
                 }
-                return await operation.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
-            {
-                throw new TimeoutException($"RPC '{method}' exceeded its deadline. The remote operation may have completed.");
             }
         }
     }
@@ -78,7 +82,7 @@ namespace Rpc233
             if (payload.Length > _maxPayloadBytes) throw new RpcException("payload_too_large", "RPC request exceeds the payload limit.");
             Func<ReadOnlyMemory<byte>, CancellationToken, Task<byte[]>> handler;
             lock (_gate)
-                if (!_handlers.TryGetValue(method, out handler!)) throw new RpcException("method_not_found", $"Unknown RPC method: {method}.");
+                if (!_handlers.TryGetValue(method, out handler)) throw new RpcException("method_not_found", $"Unknown RPC method: {method}.");
             var response = await handler(payload, cancellationToken).ConfigureAwait(false);
             if (response is null) throw new RpcException("invalid_response", "RPC handler returned null.");
             if (response.Length > _maxPayloadBytes) throw new RpcException("payload_too_large", "RPC response exceeds the payload limit.");

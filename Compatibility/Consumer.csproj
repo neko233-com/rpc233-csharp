@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ConsumerFramework Condition="'$(ConsumerFramework)' == ''">net462</ConsumerFramework>
+    <TargetFramework>$(ConsumerFramework)</TargetFramework>
+    <LangVersion Condition="'$(LangVersion)' == ''">2</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Consumer.cs" />
+    <PackageReference Include="Rpc233" Version="0.2.0">
+      <ExcludeAssets Condition="'$(ExternalAsset)' != ''">compile;runtime</ExcludeAssets>
+    </PackageReference>
+    <Reference Include="Rpc233" Condition="'$(ExternalAsset)' != ''">
+      <HintPath>$(ExternalAsset)</HintPath>
+    </Reference>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net462" Version="1.0.3" PrivateAssets="all" Condition="'$(TargetFramework)' == 'net462'" />
+  </ItemGroup>
+</Project>
